@@ -27,25 +27,29 @@ export function LogTable({ logs, loading }: LogTableProps) {
   const columns: ColumnDef<LogEntry>[] = [
     {
       id: "status",
-      header: "Estado",
+      header: "Status",
       cell: ({ row }) => <StatusIcon classification={row.original.classification} />,
       enableSorting: false,
+      enableColumnFilter: false,
     },
     {
       accessorKey: "ip",
       header: ({ column }) => <DataTableColumnHeader column={column} title="IP" />,
       cell: ({ row }) => <div className="font-mono">{row.getValue("ip")}</div>,
+      filterFn: "includesString",
     },
     {
       accessorKey: "timestamp",
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Fecha y Hora" />,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Fecha y hora" />,
       cell: ({ row }) => <div>{new Date(row.getValue("timestamp")).toLocaleString()}</div>,
       sortingFn: "datetime",
+      enableColumnFilter: false,
     },
     {
       accessorKey: "message",
       header: ({ column }) => <DataTableColumnHeader column={column} title="Mensaje" />,
       cell: ({ row }) => <div className="max-w-md truncate">{row.getValue("message")}</div>,
+      filterFn: "includesString",
     },
     {
       accessorKey: "classification",
@@ -79,11 +83,13 @@ export function LogTable({ logs, loading }: LogTableProps) {
       filterFn: (row, id, value) => {
         return value.includes(row.getValue(id))
       },
+      enableSorting: true,
     },
     {
       accessorKey: "confidence",
       header: ({ column }) => <DataTableColumnHeader column={column} title="Confianza" />,
       cell: ({ row }) => <div className="text-right">{((row.getValue("confidence") as number) * 100).toFixed(2)}%</div>,
+      enableColumnFilter: false,
     },
   ]
 
@@ -99,7 +105,7 @@ export function LogTable({ logs, loading }: LogTableProps) {
 
   return (
     <>
-      <DataTable columns={columns} data={logs} searchColumn="message" loading={loading} onRowClick={handleRowClick} />
+      <DataTable columns={columns} data={logs} loading={loading} onRowClick={handleRowClick} />
       <LogDetailDialog log={selectedLog} open={dialogOpen} onOpenChange={setDialogOpen} />
     </>
   )

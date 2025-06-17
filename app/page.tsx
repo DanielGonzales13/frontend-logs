@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,7 +8,11 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LogTable } from "@/components/log-table"
 import { DashboardStats } from "@/components/dashboard-stats"
+import { AutoRefreshStatus } from "@/components/auto-refresh-status"
+import { NotificationsPanel } from "@/components/notifications-panel"
 import { fetchLogs, classifyLog } from "@/lib/api"
+import { useAutoRefresh } from "@/hooks/use-auto-refresh"
+import { useAlerts, requestNotificationPermission } from "@/hooks/use-alerts"
 import type { LogEntry } from "@/types/logs"
 import { AlertCircle, Loader2 } from "lucide-react"
 
@@ -19,7 +23,10 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("all")
   const [logCount, setLogCount] = useState("150")
 
-  const loadLogs = async () => {
+  // Alerts hook
+  const { alerts, unreadCount, processLogs, markAsRead, markAllAsRead, dismissAlert, clearAllAlerts } = useAlerts()
+
+  const loadLogs = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -34,7 +41,11 @@ export default function Dashboard() {
             return {
               ...log,
               classification: classification.clase,
-              confidence: classification.confianza,
+              confidence:
+                typeof classification.confianza === "string"
+                  ? Number.parseFloat(classification.confianza)
+                  : classification.confianza,
+              probabilities: classification.probabilidad,
             }
           } catch (err) {
             console.error("Error classifying log:", err)
@@ -42,23 +53,48 @@ export default function Dashboard() {
               ...log,
               classification: "error",
               confidence: 0,
+              probabilities: undefined,
             }
           }
         }),
       )
 
       setLogs(processedLogs)
+
+      // Process logs for alerts
+      processLogs(processedLogs)
     } catch (err) {
       console.error("Error loading logs:", err)
       setError("Failed to load logs. Please try again.")
     } finally {
       setLoading(false)
     }
-  }
+  }, [logCount, processLogs])
 
+  // Auto-refresh hook
+  const {
+    timeLeft,
+    isActive: autoRefreshActive,
+    isRefreshing: autoRefreshing,
+    formatTimeLeft,
+    resetTimer,
+    toggleAutoRefresh,
+  } = useAutoRefresh({
+    onRefresh: loadLogs,
+    intervalMinutes: 10,
+    enabled: true,
+  })
+
+  // Initial load and request notification permission
   useEffect(() => {
     loadLogs()
+    requestNotificationPermission()
   }, [])
+
+  // Manual refresh handler
+  const handleManualRefresh = async () => {
+    await resetTimer()
+  }
 
   // Filter logs based on active tab
   const getFilteredLogs = () => {
@@ -88,11 +124,29 @@ export default function Dashboard() {
     }
   }
 
+  const isCurrentlyLoading = loading || autoRefreshing
+
   return (
     <main className="flex min-h-screen flex-col p-6 bg-gray-50">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Tablero de Clasificación de Logs</h1>
         <div className="flex items-center gap-4">
+          {/* Notifications Panel */}
+          <NotificationsPanel
+            alerts={alerts}
+            unreadCount={unreadCount}
+            logs={logs} // Add this line
+            onMarkAsRead={markAsRead}
+            onMarkAllAsRead={markAllAsRead}
+            onDismissAlert={dismissAlert}
+            onClearAll={clearAllAlerts}
+            onViewFullLog={(log) => {
+              // You can implement additional logic here if needed
+              // For now, this will open the existing log detail dialog
+              console.log("View full log:", log)
+            }} // Add this prop
+          />
+
           <div className="flex items-center gap-2">
             <Label htmlFor="log-count" className="text-sm font-medium whitespace-nowrap">
               Número de logs:
@@ -107,11 +161,23 @@ export default function Dashboard() {
             />
             <span className="text-xs text-muted-foreground whitespace-nowrap">(Max: 1000)</span>
           </div>
-          <Button onClick={loadLogs} disabled={loading} className="flex items-center gap-2">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Refrescar Logs
+          <Button onClick={handleManualRefresh} disabled={isCurrentlyLoading} className="flex items-center gap-2">
+            {isCurrentlyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Recargar Logs
           </Button>
         </div>
+      </div>
+
+      {/* Auto-refresh status */}
+      <div className="mb-4">
+        <AutoRefreshStatus
+          timeLeft={timeLeft}
+          isActive={autoRefreshActive}
+          isRefreshing={autoRefreshing}
+          formatTimeLeft={formatTimeLeft}
+          onToggle={toggleAutoRefresh}
+          onReset={resetTimer}
+        />
       </div>
 
       {error && (
@@ -123,8 +189,18 @@ export default function Dashboard() {
 
       <div className="mb-4 text-sm text-muted-foreground">
         <p>
-          <strong>Nota de rendimiento:</strong> El limite de logs es 1000 por razones de rendimiento. Actualmente se muestran {logs.length}{" "}
+          <strong>Nota de Rendimiento:</strong> El limite de logs es de 1000 por razones de rendimiento. Actualmente mostrando {logs.length}{" "}
           logs.
+          {autoRefreshActive && (
+            <span className="ml-2">
+              <strong>Auto-Recarga:</strong> Cada 10 minutos
+            </span>
+          )}
+          {alerts.length > 0 && (
+            <span className="ml-2">
+              <strong>Alertas de Seguridad:</strong> {alerts.length} total, {unreadCount} sin leer
+            </span>
+          )}
         </p>
       </div>
 
@@ -134,7 +210,7 @@ export default function Dashboard() {
 
       <Tabs defaultValue="all" className="w-full" value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-4">
-          <TabsTrigger value="all">Todos ({getFilteredLogs().length})</TabsTrigger>
+          <TabsTrigger value="all">Todos los Logs ({getFilteredLogs().length})</TabsTrigger>
           <TabsTrigger value="alerts">
             Alertas (
             {
@@ -161,10 +237,15 @@ export default function Dashboard() {
               {activeTab === "alerts" && "Alert Logs"}
               {activeTab === "warnings" && "Warning Logs"}
               {activeTab === "normal" && "Normal Logs"}
+              {isCurrentlyLoading && (
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  {autoRefreshing ? "(Auto-refreshing...)" : "(Loading...)"}
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <LogTable logs={getFilteredLogs()} loading={loading} />
+            <LogTable logs={getFilteredLogs()} loading={isCurrentlyLoading} />
           </CardContent>
         </Card>
       </Tabs>

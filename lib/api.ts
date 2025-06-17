@@ -15,8 +15,9 @@ interface LogResponse {
 
 interface ClassificationResponse {
   clase: string
-  confianza: number
+  confianza: string | number
   log: string
+  probabilidad?: Record<string, number>
 }
 
 export async function fetchLogs(size = 150): Promise<LogEntry[]> {
@@ -60,6 +61,7 @@ export async function fetchLogs(size = 150): Promise<LogEntry[]> {
         ip: source.gl2_remote_ip || source.source || "Unknown",
         classification: "",
         confidence: 0,
+        probabilities: undefined,
       }
     })
   } catch (error) {
